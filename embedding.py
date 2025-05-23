@@ -1,171 +1,91 @@
 # import os
 # import cv2
-# import torch
 # import joblib
 # import numpy as np
 # from PIL import Image
-# from facenet_pytorch import InceptionResnetV1, fixed_image_standardization
 # from torchvision import transforms
+# from facenet_pytorch import InceptionResnetV1, fixed_image_standardization
+# import torch
 
-# # Device and model
 # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # model = InceptionResnetV1(pretrained='vggface2').eval().to(device)
 
-# # Haar Cascade for face detection
-# face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
-
-# # Image transform (same for all embedding generation)
 # transform = transforms.Compose([
 #     transforms.Resize((160, 160)),
 #     transforms.ToTensor(),
 #     fixed_image_standardization
 # ])
 
-# def extract_face_embedding(image_bgr):
-#     """
-#     Extracts a face embedding from a BGR image.
-#     Returns embedding as numpy array, or None if no face detected.
-#     """
-#     gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
-#     faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5)
-
-#     if len(faces) == 0:
+# def get_embedding(img_path):
+#     img_bgr = cv2.imread(img_path)
+#     if img_bgr is None:
 #         return None
 
-#     x, y, w, h = faces[0]  # Use the first detected face
-#     face_img = image_bgr[y:y + h, x:x + w]
-#     face_pil = Image.fromarray(cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB))
-#     face_tensor = transform(face_pil).unsqueeze(0).to(device)
+#     # Since images are cropped faces, no face detection needed
+#     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+#     img_pil = Image.fromarray(img_rgb)
+#     img_tensor = transform(img_pil).unsqueeze(0).to(device)
 
 #     with torch.no_grad():
-#         embedding = model(face_tensor)
+#         embedding = model(img_tensor).squeeze().cpu().numpy()
+#     return embedding
 
-#     return embedding.squeeze().cpu().numpy()
+# DATA_DIR = 'Data'  # Path to your dataset folder with subfolders per employee
+# embedding_dict = {}
 
-# def create_embeddings_from_folder(data_dir='static/faces'):
-#     """
-#     Loops through each person folder in data_dir, processes images,
-#     and stores average embedding per person.
-#     """
-#     embedding_db = {}
+# for person in os.listdir(DATA_DIR):
+#     person_path = os.path.join(DATA_DIR, person)
+#     if not os.path.isdir(person_path):
+#         continue
 
-#     for person_name in os.listdir(data_dir):
-#         person_path = os.path.join(data_dir, person_name)
-#         if not os.path.isdir(person_path):
-#             continue
+#     embeddings = []
+#     for img_name in os.listdir(person_path):
+#         img_path = os.path.join(person_path, img_name)
+#         emb = get_embedding(img_path)
+#         if emb is not None:
+#             embeddings.append(emb)
 
-#         embeddings = []
+#     if embeddings:
+#         embedding_dict[person] = embeddings
+#         print(f"{person}: {len(embeddings)} embeddings saved.")
+#     else:
+#         print(f"{person}: No valid images found.")
 
-#         for img_name in os.listdir(person_path):
-#             img_path = os.path.join(person_path, img_name)
-#             img = cv2.imread(img_path)
-#             if img is None:
-#                 continue
+# print(embedding_dict)
+# joblib.dump(embedding_dict, 'face_embeddings.pkl')
+# print("Embeddings saved.")
 
-#             embedding = extract_face_embedding(img)
-#             if embedding is not None:
-#                 embeddings.append(embedding)
-
-#         if embeddings:
-#             embedding_db[person_name] = np.mean(embeddings, axis=0)
-
-#     return embedding_db
-
-# def save_embeddings(embedding_db, save_path='face_embeddings.pkl'):
-#     """
-#     Saves the embedding database to a .pkl file.
-#     """
-#     joblib.dump(embedding_db, save_path)
-#     print(f"Saved embeddings for {len(embedding_db)} employees to {save_path}.")
-
-# def main():
-#     data_dir = 'Data'
-#     embedding_db = create_embeddings_from_folder(data_dir)
-#     save_embeddings(embedding_db)
-
-# if __name__ == '__main__':
-#     main()
-
-
+# create_embeddings.py
 import os
-import cv2
-import torch
+import face_recognition
 import joblib
-import numpy as np
 from PIL import Image
-from facenet_pytorch import InceptionResnetV1, fixed_image_standardization
-from torchvision import transforms
+import numpy as np
 
-# Device and model initialization
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = InceptionResnetV1(pretrained='vggface2').eval().to(device)
-
-# Image transform for embedding extraction
-transform = transforms.Compose([
-    transforms.Resize((160, 160)),
-    transforms.ToTensor(),
-    fixed_image_standardization
-])
-
-def extract_embedding_from_cropped_face(image_bgr):
-    """
-    Extract embedding from a cropped face image (BGR).
-    """
-    face_pil = Image.fromarray(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB))
-    face_tensor = transform(face_pil).unsqueeze(0).to(device)
-
-    with torch.no_grad():
-        embedding = model(face_tensor)
-
-    return embedding.squeeze().cpu().numpy()
-
-def create_embeddings_from_folder(data_dir='Data'):
-    """
-    Create embeddings from cropped face images in folder structure:
-    Data/
-      employee_1/
-        img1.jpg
-        img2.jpg
-      employee_2/
-        img1.jpg
-        ...
-    Returns dict with employee_name -> list of embeddings
-    """
-    embedding_db = {}
+def create_face_encodings(data_dir):
+    known_encodings = []
+    known_names = []
 
     for person_name in os.listdir(data_dir):
-        person_path = os.path.join(data_dir, person_name)
-        if not os.path.isdir(person_path):
+        person_folder = os.path.join(data_dir, person_name)
+        if not os.path.isdir(person_folder):
             continue
 
-        embeddings = []
-        for img_name in os.listdir(person_path):
-            img_path = os.path.join(person_path, img_name)
-            img = cv2.imread(img_path)
-            if img is None:
-                print(f"Warning: Unable to read image {img_path}")
-                continue
+        for img_name in os.listdir(person_folder):
+            img_path = os.path.join(person_folder, img_name)
+            image = face_recognition.load_image_file(img_path)
+            encodings = face_recognition.face_encodings(image)
 
-            embedding = extract_embedding_from_cropped_face(img)
-            embeddings.append(embedding)
+            if encodings:
+                known_encodings.append(encodings[0])
+                known_names.append(person_name)
 
-        if embeddings:
-            embedding_db[person_name] = embeddings
-            print(f"Processed {len(embeddings)} images for {person_name}")
+    return known_encodings, known_names
 
-    return embedding_db
-
-def save_embeddings(embedding_db, save_path='face_embeddings.pkl'):
-    """
-    Save the embedding database to disk with joblib.
-    """
-    joblib.dump(embedding_db, save_path)
-    print(f"Saved embeddings for {len(embedding_db)} employees to {save_path}.")
-
-def main():
-    data_dir = 'Data'  # Your dataset root folder
-    embedding_db = create_embeddings_from_folder(data_dir)
-    save_embeddings(embedding_db)
-
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    data_dir = "Data"
+    encodings, names = create_face_encodings(data_dir)
+    
+    # Save encodings and names using joblib
+    joblib.dump((encodings, names), "saved_encodings.pkl")
+    print("Encodings saved to saved_encodings.pkl")
