@@ -1,14 +1,14 @@
 # import os
-# import cv2
-# import joblib
-# import numpy as np
 # from PIL import Image
+# import torch
 # from torchvision import transforms
 # from facenet_pytorch import InceptionResnetV1, fixed_image_standardization
-# import torch
+# import joblib
 
+# # Setup
+# data_dir = "Data"
+# resnet = InceptionResnetV1(pretrained='vggface2').eval()
 # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-# model = InceptionResnetV1(pretrained='vggface2').eval().to(device)
 
 # transform = transforms.Compose([
 #     transforms.Resize((160, 160)),
@@ -16,44 +16,26 @@
 #     fixed_image_standardization
 # ])
 
-# def get_embedding(img_path):
-#     img_bgr = cv2.imread(img_path)
-#     if img_bgr is None:
-#         return None
+# known_embeddings = []
+# known_names = []
 
-#     # Since images are cropped faces, no face detection needed
-#     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-#     img_pil = Image.fromarray(img_rgb)
-#     img_tensor = transform(img_pil).unsqueeze(0).to(device)
+# for person in os.listdir(data_dir):
+#     person_dir = os.path.join(data_dir, person)
+#     if not os.path.isdir(person_dir): continue
 
-#     with torch.no_grad():
-#         embedding = model(img_tensor).squeeze().cpu().numpy()
-#     return embedding
+#     for img_name in os.listdir(person_dir):
+#         img_path = os.path.join(person_dir, img_name)
+#         img = Image.open(img_path).convert("RGB")
+#         img_tensor = transform(img).unsqueeze(0).to(device)
+#         embedding = resnet(img_tensor).detach().cpu().numpy()[0]
 
-# DATA_DIR = 'Data'  # Path to your dataset folder with subfolders per employee
-# embedding_dict = {}
+#         known_embeddings.append(embedding)
+#         known_names.append(person)
 
-# for person in os.listdir(DATA_DIR):
-#     person_path = os.path.join(DATA_DIR, person)
-#     if not os.path.isdir(person_path):
-#         continue
-
-#     embeddings = []
-#     for img_name in os.listdir(person_path):
-#         img_path = os.path.join(person_path, img_name)
-#         emb = get_embedding(img_path)
-#         if emb is not None:
-#             embeddings.append(emb)
-
-#     if embeddings:
-#         embedding_dict[person] = embeddings
-#         print(f"{person}: {len(embeddings)} embeddings saved.")
-#     else:
-#         print(f"{person}: No valid images found.")
-
-# print(embedding_dict)
-# joblib.dump(embedding_dict, 'face_embeddings.pkl')
+# # Save embeddings
+# joblib.dump((known_embeddings, known_names), "face_embeddings.pkl")
 # print("Embeddings saved.")
+
 
 # create_embeddings.py
 import os
@@ -62,7 +44,7 @@ import joblib
 from PIL import Image
 import numpy as np
 
-def create_face_encodings(data_dir):
+def create_face_encodings(data_dir, target_size=(400, 400)):
     known_encodings = []
     known_names = []
 
@@ -73,19 +55,31 @@ def create_face_encodings(data_dir):
 
         for img_name in os.listdir(person_folder):
             img_path = os.path.join(person_folder, img_name)
-            image = face_recognition.load_image_file(img_path)
-            encodings = face_recognition.face_encodings(image)
 
-            if encodings:
-                known_encodings.append(encodings[0])
-                known_names.append(person_name)
+            try:
+                # Open and resize image using PIL
+                with Image.open(img_path) as img:
+                    img = img.convert("RGB")  # Ensure RGB format
+                    img = img.resize(target_size)
+                    image_np = np.array(img)
+
+                # Get face encodings
+                encodings = face_recognition.face_encodings(image_np)
+
+                if encodings:
+                    known_encodings.append(encodings[0])
+                    known_names.append(person_name)
+
+            except Exception as e:
+                print(f"Failed to process {img_path}: {e}")
 
     return known_encodings, known_names
 
 if __name__ == "__main__":
     data_dir = "Data"
     encodings, names = create_face_encodings(data_dir)
-    
+
     # Save encodings and names using joblib
     joblib.dump((encodings, names), "saved_encodings.pkl")
     print("Encodings saved to saved_encodings.pkl")
+
