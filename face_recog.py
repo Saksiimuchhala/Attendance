@@ -4,6 +4,12 @@ import cv2
 import numpy as np
 from sklearn.neighbors import KNeighborsClassifier
 from joblib import load
+from facenet_pytorch import MTCNN
+import torch
+
+# Initialize MTCNN once globally
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+mtcnn = MTCNN(keep_all=True, device=device)
 
 # Load encodings and names
 encodings, names = load("face_data.joblib")
@@ -12,9 +18,23 @@ encodings, names = load("face_data.joblib")
 knn = KNeighborsClassifier(n_neighbors=1, metric='euclidean')
 knn.fit(encodings, names)
 
-def recognize_faces_in_frame(frame, knn_clf, threshold=0.4):
+def recognize_faces_in_frame(frame, knn_clf, threshold=0.5):
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    face_locations = face_recognition.face_locations(rgb_frame)
+    
+    # Detect faces using MTCNN
+    boxes, _ = mtcnn.detect(rgb_frame)
+    
+    face_locations = []
+    if boxes is not None:
+        for box in boxes:
+            x1, y1, x2, y2 = box.astype(int)
+            # Convert (x1, y1, x2, y2) -> (top, right, bottom, left)
+            top, right, bottom, left = y1, x2, y2, x1
+            face_locations.append((top, right, bottom, left))
+    else:
+        face_locations = []
+    
+    # Get face encodings from detected boxes
     face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
     
     results = []
@@ -25,6 +45,8 @@ def recognize_faces_in_frame(frame, knn_clf, threshold=0.4):
         if confidence < threshold * 100:
             name = "Unknown"
         results.append((name, confidence))
+        
+        # Draw rectangle and label on frame
         cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
         label = f"{name} ({confidence:.1f}%)"
         cv2.rectangle(frame, (left, top - 35), (right, top), (0, 255, 0), cv2.FILLED)
@@ -40,10 +62,13 @@ while True:
     ret, frame = cap.read()
     if not ret:
         break
+    
     annotated_frame, recognized = recognize_faces_in_frame(frame, knn)
     cv2.imshow("Face Recognition", annotated_frame)
+    
     for name, confidence in recognized:
         print(f"Detected: {name} with confidence {confidence:.2f}%")
+    
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
