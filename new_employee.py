@@ -1,4 +1,3 @@
-# Script to capture live face images for a new employee using MTCNN
 import cv2
 import os
 import time
@@ -9,7 +8,7 @@ import torch
 
 # Initialize MTCNN
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-mtcnn = MTCNN(keep_all=False, device=device)  # Detect only 1 face per frame
+mtcnn = MTCNN(keep_all=False, device=device)  # Capture only 1 face per frame
 
 def validate_name(name):
     return name and name[0].isupper()
@@ -19,25 +18,28 @@ def create_employee_folder(base_path, employee_name):
     os.makedirs(path, exist_ok=True)
     return path
 
-def capture_faces_live(employee_name, output_folder="Data", duration=18, max_images=36, fps=2):
+def get_next_index(folder_path):
+    existing = [int(f.split('.')[0]) for f in os.listdir(folder_path)
+                if f.endswith('.jpg') and f.split('.')[0].isdigit()]
+    return max(existing, default=0) + 1
+
+def capture_faces_fixed_count(employee_name, output_folder="Data", total_images=36, wait_between=0.5):
     if not validate_name(employee_name):
-        print("Error: The first letter of the employee's name must be capitalized.")
+        print("Error: Employee name must start with a capital letter.")
         return
 
     employee_path = create_employee_folder(output_folder, employee_name)
-    cap = cv2.VideoCapture(0)
+    next_index = get_next_index(employee_path)
 
+    cap = cv2.VideoCapture(0)
     if not cap.isOpened():
-        print("Error: Could not access the camera.")
+        print("Error: Cannot access webcam.")
         return
 
-    print(f"Capturing face images for {employee_name}...")
+    print(f"📸 Starting capture for {employee_name} ({total_images} images)...")
 
     count = 0
-    interval = 1 / fps
-    start_time = time.time()
-
-    while (time.time() - start_time < duration) and (count < max_images):
+    while count < total_images:
         ret, frame = cap.read()
         if not ret:
             print("Failed to capture frame.")
@@ -50,35 +52,28 @@ def capture_faces_live(employee_name, output_folder="Data", duration=18, max_ima
         if boxes is not None:
             for box in boxes:
                 x1, y1, x2, y2 = [int(b) for b in box]
-                face = frame[y1:y2, x1:x2]  # frame is still BGR
+                face = frame[y1:y2, x1:x2]  # BGR
 
                 if face.size == 0:
-                    continue  # skip empty crops
+                    continue
 
-                existing_images = [f for f in os.listdir(employee_path) if f.endswith('.jpg')]
-                existing_numbers = [
-                int(f.split('_')[-1].split('.')[0]) for f in existing_images if f.startswith(employee_name) and f.split('_')[-1].split('.')[0].isdigit()]
-                start_index = max(existing_numbers, default=0) + 1
-                img_name = os.path.join(employee_path, f"{employee_name}_{start_index + count}.jpg")
-                
+                img_name = os.path.join(employee_path, f"{next_index + count}.jpg")
                 cv2.imwrite(img_name, face)
                 print(f"✅ Saved: {img_name}")
                 count += 1
+                break  # Only save one face per frame
 
-                if count >= max_images:
-                    break
-
-        # Show camera feed (optional)
+        # Show webcam feed (optional)
         cv2.imshow("Capturing Faces", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
-        time.sleep(interval)
+        time.sleep(wait_between)  # Wait between captures to reduce duplicates
 
     cap.release()
     cv2.destroyAllWindows()
-    print(f"Finished capturing {count} face images for {employee_name}.")
+    print(f"✅ Done! Captured {count} face images for {employee_name}.")
 
 if __name__ == "__main__":
-    name = input("Enter employee name (first letter must be capital): ").strip()
-    capture_faces_live(name, output_folder="Data", duration=10, max_images=20, fps=2)
+    name = input("Enter employee name (first letter capitalized): ").strip()
+    capture_faces_fixed_count(name, output_folder="Data", total_images=10, wait_between=0.5)
