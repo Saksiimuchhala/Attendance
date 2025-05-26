@@ -1,117 +1,82 @@
+
+# This script detects multiple faces in an image or from a live camera feed using MTCNN.
 import os
 import cv2
-import joblib
-import numpy as np
-from facenet_pytorch import InceptionResnetV1, fixed_image_standardization
-from torchvision import transforms
-from PIL import Image
 import torch
-from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
+from PIL import Image
+from facenet_pytorch import MTCNN
+import time
 
-# Setup device and model
+# Hardcoded configuration
+mode = "live"  # Change to "image" or "live"
+path = r"D:\Sakshi muchhala\attendance\group3.jpeg"  # Used only in 'image' mode
+
+# Initialize MTCNN
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = InceptionResnetV1(pretrained='vggface2').eval().to(device)
+mtcnn = MTCNN(keep_all=True, device=device)
 
-transform = transforms.Compose([
-    transforms.Resize((160, 160)),
-    transforms.ToTensor(),
-    fixed_image_standardization
-])
+# Ensure output folder exists
+os.makedirs("detect", exist_ok=True)
 
-# Load Haar Cascade for face detection
-face_detector = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
+def save_faces_from_image(image_path):
+    img = Image.open(image_path).convert('RGB')
+    boxes, _ = mtcnn.detect(img)
 
-# Load stored embeddings
-def load_embeddings(path='face_embeddings.pkl'):
-    if os.path.exists(path):
-        return joblib.load(path)
-    else:
-        print("Embedding file not found!")
-        return {}
-
-# Get embedding from image crop
-def get_embedding_from_image(image_bgr):
-    img_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-    img_pil = Image.fromarray(img_rgb)
-    img_tensor = transform(img_pil).unsqueeze(0).to(device)
-    with torch.no_grad():
-        embedding = model(img_tensor)
-    return embedding.squeeze().cpu().numpy()
-
-def detect_and_save_all_faces(image_path, save_dir="detect"):
-    img = cv2.imread(image_path)
-    if img is None:
-        print(f"❌ Failed to load image: {image_path}")
-        return []
-
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    faces = face_detector.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5)
-
-    if len(faces) == 0:
+    if boxes is None:
         print("⚠️ No faces detected.")
-        return []
-
-    # Ensure the save directory exists
-    os.makedirs(save_dir, exist_ok=True)
-
-    saved_paths = []
-    for i, (x, y, w, h) in enumerate(faces, start=1):
-        face_crop = img[y:y+h, x:x+w]
-        save_path = os.path.join(save_dir, f"{i}.jpg")
-        cv2.imwrite(save_path, face_crop)
-        saved_paths.append(save_path)
-        print(f"✅ Saved face {i} to: {save_path}")
-
-    return saved_paths
-
-# Recognize face in a single image
-def recognize_faces_in_image(image_path, embeddings_db, threshold=0.6):
-    # Step 1: Detect and save all face crops
-    cropped_face_paths = detect_and_save_all_faces(image_path, save_dir="detect")
-    if not cropped_face_paths:
-        print("⚠️ No faces to recognize.")
         return
 
-    embeddings = joblib.load('face_embeddings.pkl')
-    print("Stored employees:", list(embeddings.keys()))
+    img_np = np.array(img)
+    for i, box in enumerate(boxes, start=1):
+        x1, y1, x2, y2 = [int(b) for b in box]
+        face = img_np[y1:y2, x1:x2]
+        save_path = os.path.join("detect", f"face_{i}.jpg")
+        cv2.imwrite(save_path, cv2.cvtColor(face, cv2.COLOR_RGB2BGR))
+        print(f"✅ Saved face {i} to {save_path}")
 
+def save_faces_from_camera():
+    cap = cv2.VideoCapture(0)
+    frame_count = 0
+    face_count = 0
+    start_time = time.time() 
 
-    # Step 2: Loop through each cropped face
-    for i, crop_path in enumerate(cropped_face_paths, start=1):
-        img = cv2.imread(crop_path)
-        if img is None:
-            print(f"❌ Failed to load cropped face: {crop_path}")
-            continue
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
 
-        resized = cv2.resize(img, (160, 160))
-        embedding = get_embedding_from_image(resized)
-        if embedding is None:
-            print(f"⚠️ Could not extract embedding for: {crop_path}")
-            continue
+        frame_count += 1
+        img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        boxes, _ = mtcnn.detect(img)
 
-        # Step 3: Compare to embeddings DB
-        best_match = "Unknown"
-        best_score = 0
+        if boxes is not None:
+            for box in boxes:
+                x1, y1, x2, y2 = [int(b) for b in box]
+                face = frame[y1:y2, x1:x2]
+                face_count += 1
+                save_path = os.path.join("detect", f"cam_face_{frame_count}_{face_count}.jpg")
+                cv2.imwrite(save_path, face)
 
-        for name, emb_list in embeddings_db.items():
-            sims = [cosine_similarity([embedding], [e])[0][0] for e in emb_list]
-            max_sim = max(sims)
-            print(f"Checking {name}: Max similarity = {max_sim:.3f}")
-            if max_sim > best_score:
-                best_score = max_sim
-                best_match = name
+        # Optional: display live detection
+        if boxes is not None:
+            for box in boxes:
+                x1, y1, x2, y2 = [int(b) for b in box]
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        cv2.imshow("Live Face Detection (Press 'q' to quit)", frame)
+        if time.time() - start_time > 3:
+            break
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
 
-            if best_score < threshold:
-                best_match = "Unknown"
+    cap.release()
+    cv2.destroyAllWindows()
+    print(f"✅ Extracted {face_count} faces from live camera.")
 
-        print(f"Face {i}: {best_match} (Similarity: {best_score:.3f})")
-
-    print("✅ Face recognition complete.")
-
-
-if __name__ == "__main__":
-    # Hardcoded image path here:
-    image_path = r"D:\Sakshi muchhala\attendance\group.jpeg"
-
-    embeddings_db = load_embeddings('face_embeddings.pkl')
-    recognize_faces_in_image(image_path, embeddings_db)
+# Run the selected mode
+if mode == 'image':
+    save_faces_from_image(path)
+elif mode == 'live':
+    save_faces_from_camera()
+else:
+    print("❌ Invalid mode. Use 'image' or 'live'.")

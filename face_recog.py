@@ -10,7 +10,7 @@ import joblib
 
 # Load saved embeddings
 known_encodings, known_names = joblib.load("saved_encodings.pkl")
-print("Loaded known faces:", known_names)
+# print("Loaded known faces:", known_names)
 
 # Initialize MTCNN for face detection
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -48,7 +48,7 @@ while True:
             cv2.putText(frame, name, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
     cv2.imshow("Face Recognition", frame)
-    if cv2.waitKey(1) & 0xFF == ord('q') or (time.time() - start_time > 5):
+    if cv2.waitKey(1) & 0xFF == ord('q') or (time.time() - start_time > 20):
         break
 
 cap.release()
