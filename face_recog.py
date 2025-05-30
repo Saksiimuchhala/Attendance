@@ -6,11 +6,11 @@ import cv2
 import numpy as np
 
 # Load known encodings and names
-data = np.load("new.npz", allow_pickle=True)
+data = np.load("new_1.npz", allow_pickle=True)
 known_encodings = data["encodings"]
 known_names = data["names"]
 
-def recognize_faces_in_frame(frame, known_encodings, known_names, threshold=50.0):
+def recognize_faces_in_frame(frame, known_encodings, known_names):
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     face_locations = face_recognition.face_locations(rgb_frame)
     face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
@@ -20,29 +20,40 @@ def recognize_faces_in_frame(frame, known_encodings, known_names, threshold=50.0
         matches = face_recognition.compare_faces(known_encodings, face_encoding)
         face_distances = face_recognition.face_distance(known_encodings, face_encoding)
 
-
         if True in matches:
             best_match_index = np.argmin(face_distances)
             best_distance = face_distances[best_match_index]
             confidence = (1 - best_distance) * 100
-
-            if confidence > threshold:
-                name = known_names[best_match_index]
-            else:
-                name = "Unknown"
-                confidence = max(confidence, 0.0)  # Ensure confidence is non-negative
+            confidence = max(confidence, 0.0)  # Ensure confidence is non-negative
         else:
-            name = "Unknown"
             confidence = 0.0
 
-        results.append((name, confidence))
-
-        # Draw bounding box and label
-        cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
-        label = f"{name} ({confidence:.1f}%)"
-        cv2.rectangle(frame, (left, top - 35), (right, top), (0, 255, 0), cv2.FILLED)
-        cv2.putText(frame, label, (left + 6, top - 6),
-                    cv2.FONT_HERSHEY_DUPLEX, 0.6, (10, 10, 10), 1)
+        # Determine name and drawing behavior based on confidence thresholds
+        if confidence >= 50.0:
+            # High confidence: Use recognized name and draw green box
+            name = known_names[best_match_index] if True in matches else "Unknown"
+            results.append((name, confidence))
+            
+            cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
+            label = f"{name} ({confidence:.1f}%)"
+            cv2.rectangle(frame, (left, top - 35), (right, top), (0, 255, 0), cv2.FILLED)
+            cv2.putText(frame, label, (left + 6, top - 6),
+                        cv2.FONT_HERSHEY_DUPLEX, 0.6, (10, 10, 10), 1)
+                        
+        elif confidence <= 30.0:
+            # Low confidence: Label as unknown and draw red box
+            name = "Unknown"
+            results.append((name, confidence))
+            
+            cv2.rectangle(frame, (left, top), (right, bottom), (0, 0, 255), 2)  # Red box for unknown
+            label = f"Unknown ({confidence:.1f}%)"
+            cv2.rectangle(frame, (left, top - 35), (right, top), (0, 0, 255), cv2.FILLED)
+            cv2.putText(frame, label, (left + 6, top - 6),
+                        cv2.FONT_HERSHEY_DUPLEX, 0.6, (255, 255, 255), 1)  # White text
+        else:
+            # Medium confidence (30-50): Add to results but don't draw box
+            name = "Unknown"  # Could be uncertain recognition
+            results.append((name, confidence))
 
     return frame, results
 
